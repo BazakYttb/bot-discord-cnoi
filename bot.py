@@ -109,16 +109,6 @@ async def main():
         print(f"❌ Erreur fatale: {e}")
 
 
-@bot.command(name="sync")
-@commands.is_owner()
-async def sync(ctx):
-    """Commande pour forcer la synchronisation des slash commands"""
-    try:
-        synced = await bot.tree.sync(guild=discord.Object(id=GUILD_ID))
-        await ctx.send(f"✅ {len(synced)} commandes synchronisées !")
-    except Exception as e:
-        await ctx.send(f"❌ Erreur : {e}")
-
 
 # Lance le bot
 if __name__ == "__main__":
