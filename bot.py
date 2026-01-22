@@ -68,3 +68,22 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+# Chargement des modules (cogs)
+async def load_cogs():
+    cogs_list = [
+        'cogs.regles',
+        'cogs.idees',
+        'cogs.candidatures',
+        'cogs.organigramme',
+        'cogs.personnages',      # NOUVEAU
+        'cogs.statistiques',     # NOUVEAU
+        'cogs.reunions'          # NOUVEAU
+    ]
+    
+    print("🔄 Chargement des modules...")
+    for cog in cogs_list:
+        try:
+            await bot.load_extension(cog)
+            print(f"  ✅ {cog} chargé")
+        except Exception as e:
+            print(f"  ❌ Erreur lors du chargement de {cog} : {e}")
