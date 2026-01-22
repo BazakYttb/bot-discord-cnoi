@@ -48,3 +48,25 @@ Les décisions des modérateurs sont finales. En cas de désaccord, contactez-le
 
 ✅ En restant sur ce serveur, vous acceptez ces règles.
 """
+
+# ========================================
+# 🎫 SYSTÈME DE CANDIDATURES
+# ========================================
+CHANNEL_CANDIDATURES = 1463967316583776299  # Salon où apparaît le menu
+CATEGORY_TICKETS = 1463968783621296238      # Catégorie pour créer les tickets
+ROLE_STAFF = 1462916583927316624            # Rôle à ping et autorisé à fermer
+
+# Postes disponibles (modifie selon tes besoins)
+POSTES_DISPONIBLES = {
+    "Ministre des Armées": "🛡️",
+    "Ministre de l'Impérialisme": "👑",
+    "Ministre des Affaires Étrangères": "🌍",
+    "Ministre de la Culture": "🎭",
+    "Ministère Principal": "⚖️",
+    "Secrétaire": "📋"
+}
+
+# ========================================
+# 🏛️ ORGANIGRAMME GOUVERNEMENTAL
+# ========================================
+CHANNEL_ORGANIGRAMME = 1462916585793786062  # Salon de l'organigramme
