@@ -1,135 +1,90 @@
 import discord
+from discord import app_commands
 from discord.ext import commands
-import asyncio
-import sys
-import os
+from config.settings import CHANNEL_IDEES
 
-# Import des configurations
-from config.settings import TOKEN, GUILD_ID
-
-class DiscordBot(commands.Bot):
+class Idees(commands.Cog):
     """
-    Classe principale du bot Discord
+    Cog pour gérer le système de propositions d'idées
     """
     
-    def __init__(self):
-        # Configuration des intents
-        intents = discord.Intents.default()
-        intents.message_content = True
-        intents.members = True
-        intents.guilds = True
-        
-        super().__init__(
-            command_prefix='!',  # Préfixe pour les commandes legacy (sync)
-            intents=intents,
-            help_command=None
-        )
-        
-        self.guild_id = GUILD_ID
+    def __init__(self, bot):
+        self.bot = bot
     
-    async def setup_hook(self):
+    @app_commands.command(
+        name="idee",
+        description="Proposer une nouvelle idée pour le serveur"
+    )
+    @app_commands.describe(
+        titre="Le titre de votre idée (court et explicite)",
+        description="Description détaillée de votre idée",
+        image="URL d'une image illustrant votre idée (optionnel)"
+    )
+    async def idee(
+        self, 
+        interaction: discord.Interaction,
+        titre: str,
+        description: str,
+        image: str = None
+    ):
         """
-        Méthode appelée avant que le bot se connecte
-        Charge les cogs et synchronise les commandes
+        Commande pour soumettre une idée avec titre, description et image optionnelle
         """
-        print("🔄 Chargement des modules...")
         
-        # Liste des cogs à charger
-        cogs_list = [
-            'cogs.regles',
-            'cogs.idees'
-        ]
-        
-        # Chargement des cogs
-        for cog in cogs_list:
-            try:
-                await self.load_extension(cog)
-                print(f"  ✅ {cog} chargé")
-            except Exception as e:
-                print(f"  ❌ Erreur lors du chargement de {cog}: {e}")
-                sys.exit(1)
-        
-        # Synchronisation des commandes avec le serveur Discord
-        try:
-            guild = discord.Object(id=self.guild_id)
-            self.tree.copy_global_to(guild=guild)
-            synced = await self.tree.sync(guild=guild)
-            print(f"🔄 {len(synced)} commandes synchronisées sur le serveur {self.guild_id}")
-        except Exception as e:
-            print(f"❌ Erreur lors de la synchronisation: {e}")
-            sys.exit(1)
-    
-    async def on_ready(self):
-        """
-        Événement déclenché quand le bot est connecté
-        """
-        print(f"✅ {self.user} est connecté et opérationnel!")
-        print(f"📊 Serveurs: {len(self.guilds)}")
-        print(f"👥 Utilisateurs: {len(self.users)}")
-        
-        # Définir le statut du bot
-        await self.change_presence(
-            activity=discord.Activity(
-                type=discord.ActivityType.watching,
-                name="les idées | /idee"
+        # ✅ Vérifie qu'on est dans le bon channel
+        if interaction.channel_id != CHANNEL_IDEES:
+            channel_mention = f"<#{CHANNEL_IDEES}>"
+            await interaction.response.send_message(
+                f"❌ Cette commande ne peut être utilisée que dans {channel_mention}",
+                ephemeral=True
             )
+            return
+        
+        # ✅ Validation de l'URL de l'image (si fournie)
+        if image and not (image.startswith('http://') or image.startswith('https://')):
+            await interaction.response.send_message(
+                "❌ L'URL de l'image doit commencer par `http://` ou `https://`",
+                ephemeral=True
+            )
+            return
+        
+        # ✅ Création de l'embed
+        embed = discord.Embed(
+            title=f"💡 {titre}",
+            description=description,
+            color=discord.Color.blue(),
+            timestamp=discord.utils.utcnow()
         )
+        
+        # Ajout de l'auteur
+        embed.set_author(
+            name=f"Proposé par {interaction.user.display_name}",
+            icon_url=interaction.user.display_avatar.url
+        )
+        
+        # Ajout de l'image si fournie
+        if image:
+            embed.set_image(url=image)
+        
+        # Footer
+        embed.set_footer(text="Réagissez avec 👍 pour approuver ou 👎 pour désapprouver")
+        
+        # ✅ Réponse éphémère à l'utilisateur
+        await interaction.response.send_message(
+            "✅ Votre idée a été publiée avec succès !",
+            ephemeral=True
+        )
+        
+        # ✅ Publication de l'embed dans le channel
+        message = await interaction.channel.send(embed=embed)
+        
+        # ✅ Ajout des réactions
+        await message.add_reaction("👍")
+        await message.add_reaction("👎")
 
-# Création de l'instance du bot
-bot = DiscordBot()
-
-# ==========================================
-# COMMANDE DE SYNCHRONISATION (ADMIN ONLY)
-# ==========================================
-
-@bot.command(name="sync")
-@commands.is_owner()
-async def sync(ctx):
+# ⚠️ CETTE FONCTION EST OBLIGATOIRE ⚠️
+async def setup(bot):
     """
-    Commande pour forcer la synchronisation des slash commands
-    Utilisable uniquement par le propriétaire du bot
+    Fonction appelée par bot.load_extension()
     """
-    try:
-        guild = discord.Object(id=bot.guild_id)
-        bot.tree.copy_global_to(guild=guild)
-        synced = await bot.tree.sync(guild=guild)
-        await ctx.send(f"✅ {len(synced)} commandes synchronisées !")
-    except Exception as e:
-        await ctx.send(f"❌ Erreur : {e}")
-
-# ==========================================
-# GESTION DES ERREURS GLOBALES
-# ==========================================
-
-@bot.event
-async def on_command_error(ctx, error):
-    """Gestion des erreurs des commandes"""
-    if isinstance(error, commands.NotOwner):
-        await ctx.send("❌ Seul le propriétaire du bot peut utiliser cette commande.")
-    elif isinstance(error, commands.CommandNotFound):
-        pass  # Ignore les commandes inconnues
-    else:
-        print(f"❌ Erreur: {error}")
-
-# ==========================================
-# DÉMARRAGE DU BOT
-# ==========================================
-
-async def main():
-    """
-    Fonction principale pour démarrer le bot
-    """
-    try:
-        async with bot:
-            await bot.start(TOKEN)
-    except KeyboardInterrupt:
-        print("\n⏹️  Arrêt du bot...")
-    except Exception as e:
-        print(f"❌ Erreur fatale: {e}")
-        sys.exit(1)
-
-if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        print("\n👋 Bot arrêté proprement")
+    await bot.add_cog(Idees(bot))
