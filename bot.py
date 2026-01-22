@@ -14,31 +14,35 @@ class AssistantBot(commands.Bot):
         intents.guilds = True
         intents.members = True
         intents.message_content = True
-        
+
         super().__init__(
             command_prefix="!",
             intents=intents,
             help_command=None
         )
-        
+
+        # ✅ LISTE COMPLÈTE DES COGS
         self.initial_extensions = [
             'cogs.regles',
             'cogs.idees',
             'cogs.candidatures',
-            'cogs.organigramme'
+            'cogs.organigramme',
+            'cogs.personnages',      # ← AJOUTÉ
+            'cogs.statistiques',     # ← AJOUTÉ
+            'cogs.reunions'          # ← AJOUTÉ
         ]
 
     async def setup_hook(self):
         """Charge les cogs au démarrage"""
         print("🔄 Chargement des modules...")
-        
+
         for extension in self.initial_extensions:
             try:
                 await self.load_extension(extension)
                 print(f"  ✅ {extension} chargé")
             except Exception as e:
                 print(f"  ❌ Erreur lors du chargement de {extension} : {e}")
-        
+
         # Synchroniser les commandes avec Discord
         guild_id = os.getenv('GUILD_ID')
         if guild_id:
@@ -59,7 +63,7 @@ class AssistantBot(commands.Bot):
 
 async def main():
     bot = AssistantBot()
-    
+
     try:
         await bot.start(os.getenv('DISCORD_TOKEN'))
     except KeyboardInterrupt:
@@ -68,22 +72,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-# Chargement des modules (cogs)
-async def load_cogs():
-    cogs_list = [
-        'cogs.regles',
-        'cogs.idees',
-        'cogs.candidatures',
-        'cogs.organigramme',
-        'cogs.personnages',      # NOUVEAU
-        'cogs.statistiques',     # NOUVEAU
-        'cogs.reunions'          # NOUVEAU
-    ]
-    
-    print("🔄 Chargement des modules...")
-    for cog in cogs_list:
-        try:
-            await bot.load_extension(cog)
-            print(f"  ✅ {cog} chargé")
-        except Exception as e:
-            print(f"  ❌ Erreur lors du chargement de {cog} : {e}")
