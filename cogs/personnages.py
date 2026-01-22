@@ -4,36 +4,96 @@ from discord.ext import commands
 import json
 import os
 from datetime import datetime
+from discord.ui import Modal, TextInput
+
+class PersonnageModal(Modal, title="Fiche Personnage RP"):
+    nom_rp = TextInput(
+        label="Nom RP",
+        placeholder="Ex: Jean Dupont",
+        required=True,
+        max_length=50
+    )
+    
+    age = TextInput(
+        label="Âge",
+        placeholder="Ex: 25 ans",
+        required=True,
+        max_length=20
+    )
+    
+    origine = TextInput(
+        label="Origine",
+        placeholder="Ex: Paris, France",
+        required=True,
+        max_length=100
+    )
+    
+    histoire = TextInput(
+        label="Histoire (optionnel)",
+        placeholder="Raconte l'histoire de ton personnage...",
+        required=False,
+        style=discord.TextStyle.paragraph,
+        max_length=1000
+    )
+
+    def __init__(self, cog, user_id):
+        super().__init__()
+        self.cog = cog
+        self.user_id = str(user_id)
+        
+        # Pré-remplir si le personnage existe déjà
+        if self.user_id in self.cog.personnages:
+            perso = self.cog.personnages[self.user_id]
+            self.nom_rp.default = perso.get("nom_rp", "")
+            self.age.default = perso.get("age", "")
+            self.origine.default = perso.get("origine", "")
+            self.histoire.default = perso.get("histoire", "")
+
+    async def on_submit(self, interaction: discord.Interaction):
+        # Sauvegarde dans la base de données
+        self.cog.personnages[self.user_id] = {
+            "nom_rp": self.nom_rp.value,
+            "age": self.age.value,
+            "origine": self.origine.value,
+            "histoire": self.histoire.value,
+            "date_creation": datetime.now().isoformat()
+        }
+        
+        self.cog.save_personnages()
+        
+        embed = discord.Embed(
+            title="✅ Fiche Personnage Enregistrée",
+            description=f"**{self.nom_rp.value}** a été créé/modifié avec succès !",
+            color=discord.Color.green()
+        )
+        
+        await interaction.response.send_message(embed=embed, ephemeral=True)
 
 class Personnages(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.data_file = 'data/personnages.json'
-        os.makedirs('data', exist_ok=True)
-        self.personnages = self.load_data()
-    
-    def load_data(self):
-        """Charge les personnages depuis le JSON"""
-        try:
-            if os.path.exists(self.data_file):
+        self.data_file = "data/personnages.json"
+        self.personnages = self.load_personnages()
+
+    def load_personnages(self):
+        """Charge les personnages depuis le fichier JSON"""
+        os.makedirs("data", exist_ok=True)
+        
+        if os.path.exists(self.data_file):
+            try:
                 with open(self.data_file, 'r', encoding='utf-8') as f:
-                    content = f.read().strip()
-                    if not content:
-                        return {}
-                    return json.loads(content)
-        except (json.JSONDecodeError, ValueError):
-            print("⚠️  Fichier personnages.json corrompu, réinitialisation...")
+                    return json.load(f)
+            except json.JSONDecodeError:
+                print("⚠️ Fichier personnages.json corrompu, réinitialisation...")
+                return {}
         return {}
-    
-    def save_data(self):
-        """Sauvegarde les personnages dans le JSON"""
+
+    def save_personnages(self):
+        """Sauvegarde les personnages dans le fichier JSON"""
         with open(self.data_file, 'w', encoding='utf-8') as f:
             json.dump(self.personnages, f, indent=4, ensure_ascii=False)
-    
-    @app_commands.command(
-        name="personnage",
-        description="Créer ou consulter une fiche personnage RP"
-    )
+
+    @app_commands.command(name="personnage", description="Gérer sa fiche personnage RP")
     @app_commands.describe(
         action="Action à effectuer",
         membre="Membre à consulter (optionnel pour 'voir')"
@@ -61,122 +121,32 @@ class Personnages(commands.Cog):
             
             # Vérification si le personnage existe
             if user_id not in self.personnages:
-                return await interaction.response.send_message(
-                    f"❌ {target.mention} n'a pas encore créé de fiche personnage !",
-                    ephemeral=True
+                embed = discord.Embed(
+                    title="❌ Aucune Fiche Trouvée",
+                    description=f"{target.mention} n'a pas encore créé de personnage.",
+                    color=discord.Color.red()
                 )
+                return await interaction.response.send_message(embed=embed, ephemeral=True)
             
-            # Récupération des données
-            data = self.personnages[user_id]
+            # Affichage de la fiche
+            perso = self.personnages[user_id]
             
-            # Création de l'embed
             embed = discord.Embed(
-                title=f"📜 Fiche Personnage de {data['nom_rp']}",
-                color=discord.Color.gold(),
-                timestamp=datetime.fromisoformat(data['date_creation'])
+                title=f"📋 Fiche de {perso['nom_rp']}",
+                color=discord.Color.blue()
             )
+            
+            embed.add_field(name="👤 Nom RP", value=perso['nom_rp'], inline=True)
+            embed.add_field(name="🎂 Âge", value=perso['age'], inline=True)
+            embed.add_field(name="🌍 Origine", value=perso['origine'], inline=True)
+            
+            if perso.get('histoire'):
+                embed.add_field(name="📖 Histoire", value=perso['histoire'], inline=False)
             
             embed.set_thumbnail(url=target.display_avatar.url)
-            
-            embed.add_field(
-                name="👤 Identité",
-                value=f"**Nom :** {data['nom_rp']}\n**Âge :** {data['age']} ans\n**Origine :** {data['origine']}",
-                inline=False
-            )
-            
-            embed.add_field(
-                name="📖 Biographie",
-                value=data['biographie'][:1024],  # Limite Discord
-                inline=False
-            )
-            
-            embed.add_field(
-                name="🎭 Personnalité",
-                value=data.get('personnalite', 'Non renseignée')[:1024],
-                inline=False
-            )
-            
-            embed.set_footer(text=f"Joueur Discord : {target.name}")
+            embed.set_footer(text=f"Créé le {perso['date_creation'][:10]}")
             
             await interaction.response.send_message(embed=embed)
-
-class PersonnageModal(discord.ui.Modal, title="Création de Fiche Personnage"):
-    def __init__(self, cog, user_id):
-        super().__init__(timeout=300)
-        self.cog = cog
-        self.user_id = str(user_id)
-        
-        # Pré-remplir si le personnage existe déjà
-        existing = self.cog.personnages.get(self.user_id, {})
-        
-        self.nom_rp = discord.ui.TextInput(
-            label="Nom Complet RP",
-            placeholder="Ex: Jean-Baptiste de Valois",
-            default=existing.get('nom_rp', ''),
-            max_length=100,
-            required=True
-        )
-        
-        self.age = discord.ui.TextInput(
-            label="Âge",
-            placeholder="Ex: 35",
-            default=existing.get('age', ''),
-            max_length=3,
-            required=True
-        )
-        
-        self.origine = discord.ui.TextInput(
-            label="Origine/Région",
-            placeholder="Ex: Duché de Bourgogne",
-            default=existing.get('origine', ''),
-            max_length=100,
-            required=True
-        )
-        
-        self.biographie = discord.ui.TextInput(
-            label="Biographie",
-            placeholder="Raconte l'histoire de ton personnage...",
-            default=existing.get('biographie', ''),
-            style=discord.TextStyle.paragraph,
-            max_length=1000,
-            required=True
-        )
-        
-        self.personnalite = discord.ui.TextInput(
-            label="Personnalité/Traits",
-            placeholder="Ex: Ambitieux, rusé, loyal...",
-            default=existing.get('personnalite', ''),
-            style=discord.TextStyle.paragraph,
-            max_length=500,
-            required=False
-        )
-        
-        self.add_item(self.nom_rp)
-        self.add_item(self.age)
-        self.add_item(self.origine)
-        self.add_item(self.biographie)
-        self.add_item(self.personnalite)
-    
-    async def on_submit(self, interaction: discord.Interaction):
-        # Sauvegarde des données
-        self.cog.personnages[self.user_id] = {
-            'nom_rp': self.nom_rp.value,
-            'age': self.age.value,
-            'origine': self.origine.value,
-            'biographie': self.biographie.value,
-            'personnalite': self.personnalite.value,
-            'date_creation': datetime.utcnow().isoformat()
-        }
-        self.cog.save_data()
-        
-        # Confirmation
-        embed = discord.Embed(
-            title="✅ Fiche Personnage Enregistrée",
-            description=f"**{self.nom_rp.value}** est maintenant créé(e) !\n\nUtilise `/personnage voir` pour la consulter.",
-            color=discord.Color.green()
-        )
-        
-        await interaction.response.send_message(embed=embed, ephemeral=True)
 
 async def setup(bot):
     await bot.add_cog(Personnages(bot))
