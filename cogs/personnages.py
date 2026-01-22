@@ -41,7 +41,7 @@ class PersonnageModal(Modal, title="Fiche Personnage RP"):
         self.cog = cog
         self.user_id = str(user_id)
         
-        # Pré-remplir si le personnage existe déjà
+        # Pré-remplir si le personnage existe
         if self.user_id in self.cog.personnages:
             perso = self.cog.personnages[self.user_id]
             self.nom_rp.default = perso.get("nom_rp", "")
@@ -50,22 +50,25 @@ class PersonnageModal(Modal, title="Fiche Personnage RP"):
             self.histoire.default = perso.get("histoire", "")
 
     async def on_submit(self, interaction: discord.Interaction):
-        # Sauvegarde dans la base de données
         self.cog.personnages[self.user_id] = {
             "nom_rp": self.nom_rp.value,
             "age": self.age.value,
             "origine": self.origine.value,
-            "histoire": self.histoire.value,
+            "histoire": self.histoire.value or "Aucune histoire",
+            "discord_name": str(interaction.user),
             "date_creation": datetime.now().isoformat()
         }
         
-        self.cog.save_personnages()
+        # ✅ SAUVEGARDE IMMÉDIATE
+        self.cog.save_data()
         
         embed = discord.Embed(
-            title="✅ Fiche Personnage Enregistrée",
-            description=f"**{self.nom_rp.value}** a été créé/modifié avec succès !",
+            title="✅ Personnage Enregistré !",
+            description=f"**{self.nom_rp.value}** a été créé avec succès.",
             color=discord.Color.green()
         )
+        embed.add_field(name="👤 Âge", value=self.age.value, inline=True)
+        embed.add_field(name="🌍 Origine", value=self.origine.value, inline=True)
         
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
@@ -73,80 +76,63 @@ class Personnages(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.data_file = "data/personnages.json"
-        self.personnages = self.load_personnages()
-
-    def load_personnages(self):
-        """Charge les personnages depuis le fichier JSON"""
-        os.makedirs("data", exist_ok=True)
-        
+        self.personnages = self.load_data()
+    
+    def load_data(self):
+        """Charge les données depuis le fichier JSON"""
         if os.path.exists(self.data_file):
             try:
                 with open(self.data_file, 'r', encoding='utf-8') as f:
                     return json.load(f)
-            except json.JSONDecodeError:
-                print("⚠️ Fichier personnages.json corrompu, réinitialisation...")
+            except Exception as e:
+                print(f"❌ Erreur chargement personnages : {e}")
                 return {}
         return {}
-
-    def save_personnages(self):
-        """Sauvegarde les personnages dans le fichier JSON"""
-        with open(self.data_file, 'w', encoding='utf-8') as f:
-            json.dump(self.personnages, f, indent=4, ensure_ascii=False)
-
-    @app_commands.command(name="personnage", description="Gérer sa fiche personnage RP")
-    @app_commands.describe(
-        action="Action à effectuer",
-        membre="Membre à consulter (optionnel pour 'voir')"
-    )
-    @app_commands.choices(action=[
-        app_commands.Choice(name="Créer/Modifier mon personnage", value="create"),
-        app_commands.Choice(name="Voir un personnage", value="voir")
-    ])
-    async def personnage(
-        self, 
-        interaction: discord.Interaction, 
-        action: app_commands.Choice[str],
-        membre: discord.Member = None
-    ):
-        """Gestion des fiches personnages"""
+    
+    def save_data(self):
+        """Sauvegarde les données dans le fichier JSON"""
+        os.makedirs("data", exist_ok=True)
+        try:
+            with open(self.data_file, 'w', encoding='utf-8') as f:
+                json.dump(self.personnages, f, indent=2, ensure_ascii=False)
+            print(f"💾 Personnages sauvegardés ({len(self.personnages)} fiches)")
+        except Exception as e:
+            print(f"❌ Erreur sauvegarde personnages : {e}")
+    
+    @app_commands.command(name="creer_personnage", description="Créer ou modifier ta fiche personnage RP")
+    async def creer_personnage(self, interaction: discord.Interaction):
+        modal = PersonnageModal(self, interaction.user.id)
+        await interaction.response.send_modal(modal)
+    
+    @app_commands.command(name="voir_personnage", description="Voir la fiche d'un personnage")
+    async def voir_personnage(self, interaction: discord.Interaction, membre: discord.Member = None):
+        target = membre or interaction.user
+        user_id = str(target.id)
         
-        if action.value == "create":
-            # Modal pour créer/modifier le personnage
-            modal = PersonnageModal(self, interaction.user.id)
-            await interaction.response.send_modal(modal)
-        
-        elif action.value == "voir":
-            target = membre or interaction.user
-            user_id = str(target.id)
-            
-            # Vérification si le personnage existe
-            if user_id not in self.personnages:
-                embed = discord.Embed(
-                    title="❌ Aucune Fiche Trouvée",
-                    description=f"{target.mention} n'a pas encore créé de personnage.",
-                    color=discord.Color.red()
-                )
-                return await interaction.response.send_message(embed=embed, ephemeral=True)
-            
-            # Affichage de la fiche
-            perso = self.personnages[user_id]
-            
+        if user_id not in self.personnages:
             embed = discord.Embed(
-                title=f"📋 Fiche de {perso['nom_rp']}",
-                color=discord.Color.blue()
+                title="❌ Aucun Personnage",
+                description=f"{target.mention} n'a pas encore créé de personnage.",
+                color=discord.Color.red()
             )
-            
-            embed.add_field(name="👤 Nom RP", value=perso['nom_rp'], inline=True)
-            embed.add_field(name="🎂 Âge", value=perso['age'], inline=True)
-            embed.add_field(name="🌍 Origine", value=perso['origine'], inline=True)
-            
-            if perso.get('histoire'):
-                embed.add_field(name="📖 Histoire", value=perso['histoire'], inline=False)
-            
-            embed.set_thumbnail(url=target.display_avatar.url)
-            embed.set_footer(text=f"Créé le {perso['date_creation'][:10]}")
-            
-            await interaction.response.send_message(embed=embed)
+            return await interaction.response.send_message(embed=embed, ephemeral=True)
+        
+        perso = self.personnages[user_id]
+        
+        embed = discord.Embed(
+            title=f"📋 Fiche de {perso['nom_rp']}",
+            color=discord.Color.blue()
+        )
+        
+        embed.add_field(name="👤 Âge", value=perso['age'], inline=True)
+        embed.add_field(name="🌍 Origine", value=perso['origine'], inline=True)
+        embed.add_field(name="📖 Histoire", value=perso['histoire'], inline=False)
+        embed.add_field(name="💬 Discord", value=perso['discord_name'], inline=True)
+        
+        embed.set_thumbnail(url=target.display_avatar.url)
+        embed.set_footer(text=f"Créé le {perso['date_creation'][:10]}")
+        
+        await interaction.response.send_message(embed=embed)
 
 async def setup(bot):
     await bot.add_cog(Personnages(bot))
