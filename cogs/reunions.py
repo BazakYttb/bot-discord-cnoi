@@ -4,14 +4,13 @@ from discord.ext import commands, tasks
 import json
 import os
 from datetime import datetime, timedelta
-import asyncio
 
 class Reunions(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.data_file = "data/reunions.json"
         self.reunions = self.load_data()
-        self.check_reminders.start()  # Démarre la boucle de vérification
+        self.check_reminders.start()
     
     def load_data(self):
         """Charge les réunions depuis le fichier JSON"""
@@ -30,7 +29,7 @@ class Reunions(commands.Cog):
         """Arrête la boucle lors du déchargement du cog"""
         self.check_reminders.cancel()
     
-    @tasks.loop(minutes=1)  # Vérifie toutes les minutes
+    @tasks.loop(minutes=1)
     async def check_reminders(self):
         """Vérifie et envoie les rappels de réunions"""
         try:
@@ -40,7 +39,6 @@ class Reunions(commands.Cog):
             for reunion in self.reunions:
                 date_reunion = datetime.fromisoformat(reunion['date'])
                 
-                # Calcul des moments de rappel
                 rappel_30min = date_reunion - timedelta(minutes=30)
                 rappel_5min = date_reunion - timedelta(minutes=5)
                 
@@ -49,30 +47,25 @@ class Reunions(commands.Cog):
                     await self.send_reminder(reunion, "30 minutes", discord.Color.blue())
                     reunion['rappel_30min_envoye'] = True
                     self.save_data()
-                    print(f"✅ Rappel 30min envoyé pour: {reunion['titre']}")
                 
                 # ⏰ RAPPEL 5 MINUTES AVANT
                 if not reunion.get('rappel_5min_envoye') and now >= rappel_5min and now < date_reunion:
                     await self.send_reminder(reunion, "5 minutes", discord.Color.orange())
                     reunion['rappel_5min_envoye'] = True
                     self.save_data()
-                    print(f"✅ Rappel 5min envoyé pour: {reunion['titre']}")
                 
-                # 🚀 RAPPEL AU DÉBUT DE LA RÉUNION
+                # 🚀 RAPPEL AU DÉBUT
                 if not reunion.get('rappel_debut_envoye') and now >= date_reunion and now < date_reunion + timedelta(minutes=5):
                     await self.send_reminder(reunion, "maintenant", discord.Color.red(), debut=True)
                     reunion['rappel_debut_envoye'] = True
                     self.save_data()
-                    print(f"✅ Rappel DÉBUT envoyé pour: {reunion['titre']}")
                 
-                # 🗑️ Suppression des anciennes réunions (24h après)
+                # 🗑️ Suppression 24h après
                 if now > date_reunion + timedelta(hours=24):
                     reunions_a_supprimer.append(reunion)
             
-            # Nettoyage
             for reunion in reunions_a_supprimer:
                 self.reunions.remove(reunion)
-                print(f"🗑️ Réunion supprimée: {reunion['titre']}")
             
             if reunions_a_supprimer:
                 self.save_data()
@@ -82,11 +75,10 @@ class Reunions(commands.Cog):
     
     @check_reminders.before_loop
     async def before_check_reminders(self):
-        """Attend que le bot soit prêt avant de démarrer la boucle"""
         await self.bot.wait_until_ready()
     
     async def send_reminder(self, reunion, temps, couleur, debut=False):
-        """Envoie un rappel de réunion"""
+        """Envoie un rappel dans le channel"""
         try:
             guild = self.bot.get_guild(reunion['guild_id'])
             if not guild:
@@ -96,8 +88,11 @@ class Reunions(commands.Cog):
             if not channel:
                 return
             
-            # Mention des participants
-            mentions = " ".join([f"<@{user_id}>" for user_id in reunion['participants']])
+            # 🎯 PING UNIQUEMENT LES PARTICIPANTS CONFIRMÉS (✅)
+            mentions = " ".join([f"<@{user_id}>" for user_id in reunion.get('participants_confirmes', [])])
+            
+            if not mentions:
+                mentions = "⚠️ Aucun participant confirmé"
             
             if debut:
                 titre = "🔴 LA RÉUNION COMMENCE MAINTENANT !"
@@ -119,9 +114,12 @@ class Reunions(commands.Cog):
                 inline=False
             )
             
+            nb_confirmes = len(reunion.get('participants_confirmes', []))
+            nb_absents = len(reunion.get('participants_absents', []))
+            
             embed.add_field(
-                name="👥 Participants Attendus",
-                value=f"{len(reunion['participants'])} personnes",
+                name="👥 Participants",
+                value=f"✅ Confirmés : **{nb_confirmes}**\n❌ Absents : **{nb_absents}**",
                 inline=True
             )
             
@@ -141,7 +139,7 @@ class Reunions(commands.Cog):
     
     @app_commands.command(
         name="reunion",
-        description="📅 Planifier une réunion avec rappels automatiques"
+        description="📅 Planifier une réunion avec système de confirmation"
     )
     @app_commands.describe(
         date="Date (format: JJ/MM/AAAA)",
@@ -160,11 +158,9 @@ class Reunions(commands.Cog):
         participants: str
     ):
         try:
-            # Parse de la date et heure
             date_str = f"{date} {heure}"
             date_reunion = datetime.strptime(date_str, "%d/%m/%Y %H:%M")
             
-            # Vérification que la date est dans le futur
             if date_reunion <= datetime.now():
                 embed = discord.Embed(
                     title="❌ Erreur",
@@ -173,7 +169,7 @@ class Reunions(commands.Cog):
                 )
                 return await interaction.response.send_message(embed=embed, ephemeral=True)
             
-            # Extraction des IDs des participants
+            # Extraction des IDs
             participant_ids = []
             for word in participants.split():
                 if word.startswith('<@') and word.endswith('>'):
@@ -191,31 +187,11 @@ class Reunions(commands.Cog):
                 )
                 return await interaction.response.send_message(embed=embed, ephemeral=True)
             
-            # Création de la réunion
-            reunion_data = {
-                'id': len(self.reunions) + 1,
-                'guild_id': interaction.guild_id,
-                'channel_id': interaction.channel_id,
-                'organisateur_id': interaction.user.id,
-                'organisateur_name': interaction.user.display_name,
-                'date': date_reunion.isoformat(),
-                'titre': titre,
-                'sujet': sujet,
-                'participants': participant_ids,
-                'rappel_30min_envoye': False,
-                'rappel_5min_envoye': False,
-                'rappel_debut_envoye': False,
-                'created_at': datetime.now().isoformat()
-            }
-            
-            self.reunions.append(reunion_data)
-            self.save_data()
-            
-            # Confirmation
+            # Création embed principal
             embed = discord.Embed(
-                title="✅ Réunion Planifiée",
+                title="📅 Nouvelle Réunion Planifiée",
                 description=f"**{titre}**",
-                color=discord.Color.green(),
+                color=discord.Color.blue(),
                 timestamp=date_reunion
             )
             
@@ -226,28 +202,67 @@ class Reunions(commands.Cog):
             )
             
             embed.add_field(
-                name="👥 Participants",
-                value=f"{len(participant_ids)} personnes",
+                name="🕐 Date & Heure",
+                value=f"📅 {date_reunion.strftime('%d/%m/%Y')}\n🕐 {date_reunion.strftime('%H:%M')}",
                 inline=True
             )
             
             embed.add_field(
-                name="⏰ Rappels",
-                value="📣 **30 minutes** avant\n📣 **5 minutes** avant\n🔴 **Au début** de la réunion",
+                name="👥 Participants Invités",
+                value=f"{len(participant_ids)} personne(s)",
+                inline=True
+            )
+            
+            embed.add_field(
+                name="⏰ Rappels Automatiques",
+                value="📣 30 minutes avant\n📣 5 minutes avant\n🔴 Au début",
                 inline=False
             )
             
-            embed.set_footer(text=f"ID: {reunion_data['id']} • Organisateur: {interaction.user.display_name}")
+            embed.add_field(
+                name="📌 Confirmer sa Présence",
+                value="✅ Je serai présent\n❌ Je serai absent",
+                inline=False
+            )
             
-            # Mention des participants
+            embed.set_footer(text=f"Organisé par {interaction.user.display_name}")
+            
+            # Envoi du message
             mentions = " ".join([f"<@{uid}>" for uid in participant_ids])
-            
             await interaction.response.send_message(content=mentions, embed=embed)
+            message = await interaction.original_response()
+            
+            # Ajout des réactions
+            await message.add_reaction("✅")
+            await message.add_reaction("❌")
+            
+            # Sauvegarde
+            reunion_data = {
+                'id': len(self.reunions) + 1,
+                'message_id': message.id,
+                'guild_id': interaction.guild_id,
+                'channel_id': interaction.channel_id,
+                'organisateur_id': interaction.user.id,
+                'organisateur_name': interaction.user.display_name,
+                'date': date_reunion.isoformat(),
+                'titre': titre,
+                'sujet': sujet,
+                'participants_invites': participant_ids,
+                'participants_confirmes': [],
+                'participants_absents': [],
+                'rappel_30min_envoye': False,
+                'rappel_5min_envoye': False,
+                'rappel_debut_envoye': False,
+                'created_at': datetime.now().isoformat()
+            }
+            
+            self.reunions.append(reunion_data)
+            self.save_data()
             
         except ValueError:
             embed = discord.Embed(
                 title="❌ Format Invalide",
-                description="**Format attendu :**\n📅 Date: `JJ/MM/AAAA`\n🕐 Heure: `HH:MM`\n\n**Exemple:** `25/12/2024` et `14:30`",
+                description="**Format attendu :**\n📅 Date: `JJ/MM/AAAA`\n🕐 Heure: `HH:MM`",
                 color=discord.Color.red()
             )
             await interaction.response.send_message(embed=embed, ephemeral=True)
@@ -255,63 +270,168 @@ class Reunions(commands.Cog):
         except Exception as e:
             embed = discord.Embed(
                 title="❌ Erreur",
-                description=f"Une erreur s'est produite: {str(e)}",
+                description=f"Erreur: {str(e)}",
                 color=discord.Color.red()
             )
             await interaction.response.send_message(embed=embed, ephemeral=True)
+    
+    @commands.Cog.listener()
+    async def on_raw_reaction_add(self, payload):
+        """Gère les réactions ✅ et ❌"""
+        # Ignore le bot
+        if payload.user_id == self.bot.user.id:
+            return
+        
+        # Trouve la réunion
+        reunion = next((r for r in self.reunions if r.get('message_id') == payload.message_id), None)
+        if not reunion:
+            return
+        
+        # Vérifie que c'est un participant invité
+        if payload.user_id not in reunion['participants_invites']:
+            return
+        
+        guild = self.bot.get_guild(payload.guild_id)
+        user = guild.get_member(payload.user_id)
+        
+        # ✅ CONFIRMATION DE PRÉSENCE
+        if str(payload.emoji) == "✅":
+            # Retire des absents si présent
+            if payload.user_id in reunion['participants_absents']:
+                reunion['participants_absents'].remove(payload.user_id)
+            
+            # Ajoute aux confirmés
+            if payload.user_id not in reunion['participants_confirmes']:
+                reunion['participants_confirmes'].append(payload.user_id)
+                self.save_data()
+                
+                # 📩 ENVOI DU MP
+                try:
+                    date_reunion = datetime.fromisoformat(reunion['date'])
+                    embed = discord.Embed(
+                        title="✅ Confirmation de Présence",
+                        description=f"Vous êtes bien inscrit à la réunion **{reunion['titre']}**",
+                        color=discord.Color.green(),
+                        timestamp=date_reunion
+                    )
+                    
+                    embed.add_field(
+                        name="📅 Date",
+                        value=date_reunion.strftime('%d/%m/%Y à %H:%M'),
+                        inline=True
+                    )
+                    
+                    embed.add_field(
+                        name="📋 Sujet",
+                        value=reunion['sujet'],
+                        inline=False
+                    )
+                    
+                    embed.add_field(
+                        name="⏰ Rappels",
+                        value="Vous recevrez des pings :\n📣 30 min avant\n📣 5 min avant\n🔴 Au début",
+                        inline=False
+                    )
+                    
+                    embed.set_footer(text=f"Organisé par {reunion['organisateur_name']}")
+                    
+                    await user.send(embed=embed)
+                except discord.Forbidden:
+                    print(f"⚠️ Impossible d'envoyer un MP à {user.name}")
+        
+        # ❌ DÉCLARATION D'ABSENCE
+        elif str(payload.emoji) == "❌":
+            # Retire des confirmés
+            if payload.user_id in reunion['participants_confirmes']:
+                reunion['participants_confirmes'].remove(payload.user_id)
+            
+            # Ajoute aux absents
+            if payload.user_id not in reunion['participants_absents']:
+                reunion['participants_absents'].append(payload.user_id)
+                self.save_data()
+                
+                # 📩 MP D'ABSENCE
+                try:
+                    date_reunion = datetime.fromisoformat(reunion['date'])
+                    embed = discord.Embed(
+                        title="❌ Absence Enregistrée",
+                        description=f"Votre absence à la réunion **{reunion['titre']}** a été enregistrée.",
+                        color=discord.Color.red(),
+                        timestamp=date_reunion
+                    )
+                    
+                    embed.add_field(
+                        name="📅 Date",
+                        value=date_reunion.strftime('%d/%m/%Y à %H:%M'),
+                        inline=True
+                    )
+                    
+                    embed.add_field(
+                        name="ℹ️ Information",
+                        value="Vous ne recevrez pas de rappels pour cette réunion.",
+                        inline=False
+                    )
+                    
+                    await user.send(embed=embed)
+                except discord.Forbidden:
+                    print(f"⚠️ Impossible d'envoyer un MP à {user.name}")
+    
+    @commands.Cog.listener()
+    async def on_raw_reaction_remove(self, payload):
+        """Gère le retrait des réactions"""
+        reunion = next((r for r in self.reunions if r.get('message_id') == payload.message_id), None)
+        if not reunion:
+            return
+        
+        if str(payload.emoji) == "✅" and payload.user_id in reunion['participants_confirmes']:
+            reunion['participants_confirmes'].remove(payload.user_id)
+            self.save_data()
+        
+        elif str(payload.emoji) == "❌" and payload.user_id in reunion['participants_absents']:
+            reunion['participants_absents'].remove(payload.user_id)
+            self.save_data()
     
     @app_commands.command(
         name="voir_reunions",
         description="📋 Voir toutes les réunions planifiées"
     )
     async def voir_reunions(self, interaction: discord.Interaction):
-        if not self.reunions:
+        reunions_futures = [
+            r for r in self.reunions 
+            if datetime.fromisoformat(r['date']) > datetime.now()
+        ]
+        
+        if not reunions_futures:
             embed = discord.Embed(
                 title="📅 Aucune Réunion",
-                description="Aucune réunion n'est planifiée pour le moment.",
+                description="Aucune réunion planifiée pour le moment.",
                 color=discord.Color.blue()
             )
             return await interaction.response.send_message(embed=embed)
         
-        # Trier par date
-        reunions_triees = sorted(
-            [r for r in self.reunions if datetime.fromisoformat(r['date']) > datetime.now()],
-            key=lambda x: x['date']
-        )
-        
-        if not reunions_triees:
-            embed = discord.Embed(
-                title="📅 Aucune Réunion à Venir",
-                description="Toutes les réunions sont passées.",
-                color=discord.Color.blue()
-            )
-            return await interaction.response.send_message(embed=embed)
+        reunions_triees = sorted(reunions_futures, key=lambda x: x['date'])
         
         embed = discord.Embed(
-            title="📅 Réunions Planifiées",
-            description=f"**{len(reunions_triees)}** réunion(s) à venir",
+            title="📅 Réunions à Venir",
+            description=f"**{len(reunions_triees)}** réunion(s) planifiée(s)",
             color=discord.Color.blue()
         )
         
-        for reunion in reunions_triees[:10]:  # Max 10
+        for reunion in reunions_triees[:10]:
             date_reunion = datetime.fromisoformat(reunion['date'])
-            
-            # Calcul du temps restant
             delta = date_reunion - datetime.now()
-            jours = delta.days
-            heures = delta.seconds // 3600
-            minutes = (delta.seconds % 3600) // 60
             
-            if jours > 0:
-                temps_restant = f"Dans {jours}j {heures}h"
-            elif heures > 0:
-                temps_restant = f"Dans {heures}h {minutes}min"
+            if delta.days > 0:
+                temps = f"Dans {delta.days}j {delta.seconds//3600}h"
             else:
-                temps_restant = f"Dans {minutes}min"
+                temps = f"Dans {delta.seconds//3600}h {(delta.seconds%3600)//60}min"
+            
+            nb_confirmes = len(reunion.get('participants_confirmes', []))
+            nb_absents = len(reunion.get('participants_absents', []))
             
             embed.add_field(
                 name=f"🗓️ {reunion['titre']}",
-                value=f"📅 {date_reunion.strftime('%d/%m/%Y à %H:%M')}\n⏰ {temps_restant}\n👥 {len(reunion['participants'])} participants\n📝 ID: `{reunion['id']}`",
+                value=f"📅 {date_reunion.strftime('%d/%m/%Y à %H:%M')}\n⏰ {temps}\n✅ {nb_confirmes} confirmés • ❌ {nb_absents} absents",
                 inline=False
             )
         
@@ -319,38 +439,34 @@ class Reunions(commands.Cog):
     
     @app_commands.command(
         name="annuler_reunion",
-        description="🗑️ Annuler une réunion planifiée"
+        description="🗑️ Annuler une réunion"
     )
-    @app_commands.describe(
-        reunion_id="ID de la réunion à annuler"
-    )
+    @app_commands.describe(reunion_id="ID de la réunion")
     async def annuler_reunion(self, interaction: discord.Interaction, reunion_id: int):
         reunion = next((r for r in self.reunions if r['id'] == reunion_id), None)
         
         if not reunion:
             embed = discord.Embed(
-                title="❌ Réunion Introuvable",
+                title="❌ Introuvable",
                 description=f"Aucune réunion avec l'ID `{reunion_id}`.",
                 color=discord.Color.red()
             )
             return await interaction.response.send_message(embed=embed, ephemeral=True)
         
-        # Vérification des permissions
         if reunion['organisateur_id'] != interaction.user.id and not interaction.user.guild_permissions.administrator:
             embed = discord.Embed(
                 title="❌ Permission Refusée",
-                description="Seul l'organisateur ou un administrateur peut annuler cette réunion.",
+                description="Seul l'organisateur ou un admin peut annuler.",
                 color=discord.Color.red()
             )
             return await interaction.response.send_message(embed=embed, ephemeral=True)
         
-        # Suppression
         self.reunions.remove(reunion)
         self.save_data()
         
         embed = discord.Embed(
             title="✅ Réunion Annulée",
-            description=f"La réunion **{reunion['titre']}** a été annulée.",
+            description=f"**{reunion['titre']}** a été annulée.",
             color=discord.Color.green()
         )
         
