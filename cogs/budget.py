@@ -22,7 +22,6 @@ class Budget(commands.Cog):
             with open(self.data_file, 'r', encoding='utf-8') as f:
                 return json.load(f)
         else:
-            # Structure initiale
             return {
                 "solde": 0,
                 "transactions": []
@@ -31,14 +30,14 @@ class Budget(commands.Cog):
     def save_data(self):
         """Sauvegarde les données du budget"""
         with open(self.data_file, 'w', encoding='utf-8') as f:
-            json.dump(self.budget_data, data=f, indent=4, ensure_ascii=False)
+            json.dump(self.budget_data, f, indent=4, ensure_ascii=False)
 
     def ajouter_transaction(self, montant: float, type_transaction: str, description: str, auteur: str):
         """Ajoute une transaction au système"""
         transaction = {
             "date": datetime.now().isoformat(),
             "montant": montant,
-            "type": type_transaction,  # "entree" ou "sortie"
+            "type": type_transaction,
             "description": description,
             "auteur": auteur
         }
@@ -55,7 +54,6 @@ class Budget(commands.Cog):
     def generer_graphique(self) -> BytesIO:
         """Génère un graphique de l'évolution du budget"""
         if not self.budget_data["transactions"]:
-            # Créer un graphique vide
             fig, ax = plt.subplots(figsize=(10, 6))
             ax.text(0.5, 0.5, 'Aucune donnée disponible', 
                    ha='center', va='center', fontsize=16)
@@ -63,7 +61,6 @@ class Budget(commands.Cog):
             ax.set_ylim(0, 1)
             ax.axis('off')
         else:
-            # Préparer les données
             dates = []
             soldes = []
             solde_cumul = 0
@@ -79,46 +76,43 @@ class Budget(commands.Cog):
                 
                 soldes.append(solde_cumul)
             
-            # Créer le graphique
             fig, ax = plt.subplots(figsize=(12, 6))
-            ax.plot(dates, soldes, marker='o', linestyle='-', linewidth=2, markersize=6)
+            ax.plot(dates, soldes, marker='o', linewidth=2, markersize=6, color='#5865F2')
+            ax.fill_between(dates, soldes, alpha=0.3, color='#5865F2')
             
-            # Personnalisation
-            ax.set_xlabel('Date', fontsize=12)
-            ax.set_ylabel('Solde (€)', fontsize=12)
-            ax.set_title('Évolution du Budget de l\'État', fontsize=14, fontweight='bold')
-            ax.grid(True, alpha=0.3)
+            ax.set_xlabel('Date', fontsize=12, fontweight='bold')
+            ax.set_ylabel('Solde (€)', fontsize=12, fontweight='bold')
+            ax.set_title('Évolution du Budget', fontsize=14, fontweight='bold')
             
-            # Formater les dates sur l'axe X
             ax.xaxis.set_major_formatter(mdates.DateFormatter('%d/%m'))
+            ax.xaxis.set_major_locator(mdates.AutoDateLocator())
+            
             plt.xticks(rotation=45)
-            
-            # Ligne horizontale à 0
-            ax.axhline(y=0, color='r', linestyle='--', alpha=0.5)
-            
+            ax.grid(True, alpha=0.3)
             plt.tight_layout()
         
-        # Sauvegarder dans un buffer
         buffer = BytesIO()
-        plt.savefig(buffer, format='png', dpi=100)
+        plt.savefig(buffer, format='png', dpi=150, bbox_inches='tight')
         buffer.seek(0)
         plt.close()
         
         return buffer
 
-    @app_commands.command(name="budget_voir", description="📊 Affiche l'état actuel du budget")
+    @app_commands.command(name="budget_voir", description="💰 Voir le budget actuel")
     async def budget_voir(self, interaction: discord.Interaction):
-        """Affiche le budget avec un graphique"""
+        """Affiche le budget avec graphique"""
         
-        # Calculer les statistiques
+        # Génération du graphique
+        graphique = self.generer_graphique()
+        
+        # Calcul des statistiques
         total_entrees = sum(t["montant"] for t in self.budget_data["transactions"] if t["type"] == "entree")
         total_sorties = sum(t["montant"] for t in self.budget_data["transactions"] if t["type"] == "sortie")
-        nb_transactions = len(self.budget_data["transactions"])
         
-        # Créer l'embed
+        # Création de l'embed
         embed = discord.Embed(
             title="💰 Budget de l'État",
-            color=discord.Color.blue() if self.budget_data["solde"] >= 0 else discord.Color.red(),
+            color=discord.Color.gold(),
             timestamp=datetime.now()
         )
         
@@ -128,23 +122,21 @@ class Budget(commands.Cog):
             inline=False
         )
         
-        embed.add_field(name="📈 Entrées Totales", value=f"{total_entrees:,.2f} €", inline=True)
-        embed.add_field(name="📉 Sorties Totales", value=f"{total_sorties:,.2f} €", inline=True)
-        embed.add_field(name="🔢 Transactions", value=str(nb_transactions), inline=True)
+        embed.add_field(name="📈 Entrées totales", value=f"{total_entrees:,.2f} €", inline=True)
+        embed.add_field(name="📉 Sorties totales", value=f"{total_sorties:,.2f} €", inline=True)
+        embed.add_field(name="🔢 Transactions", value=str(len(self.budget_data["transactions"])), inline=True)
         
-        # Générer le graphique
-        graphique = self.generer_graphique()
+        embed.set_footer(text=f"Demandé par {interaction.user.display_name}")
+        
         file = discord.File(graphique, filename="budget.png")
         embed.set_image(url="attachment://budget.png")
         
-        embed.set_footer(text=f"Demandé par {interaction.user.name}")
-        
         await interaction.response.send_message(embed=embed, file=file)
 
-    @app_commands.command(name="budget_ajouter", description="💸 Ajouter de l'argent au budget")
+    @app_commands.command(name="budget_ajouter", description="➕ Ajouter de l'argent au budget")
     @app_commands.describe(
         montant="Montant à ajouter (en euros)",
-        source="Source de l'argent (ex: Impôts, Subvention)"
+        source="Source de l'argent (ex: Impôts, Donations)"
     )
     async def budget_ajouter(self, interaction: discord.Interaction, montant: float, source: str):
         """Ajoute de l'argent au budget"""
@@ -153,29 +145,22 @@ class Budget(commands.Cog):
             await interaction.response.send_message("❌ Le montant doit être positif !", ephemeral=True)
             return
         
-        self.ajouter_transaction(
-            montant=montant,
-            type_transaction="entree",
-            description=source,
-            auteur=str(interaction.user)
-        )
+        self.ajouter_transaction(montant, "entree", source, interaction.user.display_name)
         
         embed = discord.Embed(
             title="✅ Argent Ajouté",
-            color=discord.Color.green(),
-            timestamp=datetime.now()
+            description=f"**+{montant:,.2f} €** ajoutés au budget",
+            color=discord.Color.green()
         )
-        
-        embed.add_field(name="💵 Montant", value=f"+{montant:,.2f} €", inline=True)
-        embed.add_field(name="📝 Source", value=source, inline=True)
-        embed.add_field(name="💰 Nouveau Solde", value=f"{self.budget_data['solde']:,.2f} €", inline=False)
+        embed.add_field(name="Source", value=source, inline=False)
+        embed.add_field(name="Nouveau Solde", value=f"**{self.budget_data['solde']:,.2f} €**", inline=False)
         
         await interaction.response.send_message(embed=embed)
 
-    @app_commands.command(name="budget_depenser", description="💳 Dépenser de l'argent du budget")
+    @app_commands.command(name="budget_depenser", description="➖ Dépenser de l'argent")
     @app_commands.describe(
-        montant="Montant à dépenser (en euros)",
-        raison="Raison de la dépense"
+        montant="Montant à retirer (en euros)",
+        raison="Raison de la dépense (ex: Salaires, Achats)"
     )
     async def budget_depenser(self, interaction: discord.Interaction, montant: float, raison: str):
         """Retire de l'argent du budget"""
@@ -191,28 +176,21 @@ class Budget(commands.Cog):
             )
             return
         
-        self.ajouter_transaction(
-            montant=montant,
-            type_transaction="sortie",
-            description=raison,
-            auteur=str(interaction.user)
-        )
+        self.ajouter_transaction(montant, "sortie", raison, interaction.user.display_name)
         
         embed = discord.Embed(
-            title="✅ Dépense Enregistrée",
-            color=discord.Color.orange(),
-            timestamp=datetime.now()
+            title="✅ Dépense Effectuée",
+            description=f"**-{montant:,.2f} €** retirés du budget",
+            color=discord.Color.red()
         )
-        
-        embed.add_field(name="💳 Montant", value=f"-{montant:,.2f} €", inline=True)
-        embed.add_field(name="📝 Raison", value=raison, inline=True)
-        embed.add_field(name="💰 Nouveau Solde", value=f"{self.budget_data['solde']:,.2f} €", inline=False)
+        embed.add_field(name="Raison", value=raison, inline=False)
+        embed.add_field(name="Nouveau Solde", value=f"**{self.budget_data['solde']:,.2f} €**", inline=False)
         
         await interaction.response.send_message(embed=embed)
 
-    @app_commands.command(name="budget_historique", description="📜 Voir l'historique des 10 dernières transactions")
+    @app_commands.command(name="budget_historique", description="📜 Voir l'historique des transactions")
     async def budget_historique(self, interaction: discord.Interaction):
-        """Affiche l'historique des transactions"""
+        """Affiche les 10 dernières transactions"""
         
         if not self.budget_data["transactions"]:
             await interaction.response.send_message("📭 Aucune transaction enregistrée.", ephemeral=True)
@@ -225,13 +203,12 @@ class Budget(commands.Cog):
         )
         
         # Prendre les 10 dernières transactions
-        dernieres = self.budget_data["transactions"][-10:]
-        dernieres.reverse()
+        dernieres = self.budget_data["transactions"][-10:][::-1]
         
         for trans in dernieres:
             date = datetime.fromisoformat(trans["date"]).strftime("%d/%m/%Y %H:%M")
-            symbole = "📈" if trans["type"] == "entree" else "📉"
             signe = "+" if trans["type"] == "entree" else "-"
+            symbole = "📈" if trans["type"] == "entree" else "📉"
             
             embed.add_field(
                 name=f"{symbole} {date}",
@@ -244,7 +221,7 @@ class Budget(commands.Cog):
     @app_commands.command(name="budget_reset", description="🔄 Réinitialiser le budget (ADMIN)")
     @app_commands.checks.has_permissions(administrator=True)
     async def budget_reset(self, interaction: discord.Interaction):
-        """Réinitialise complètement le budget (ADMIN uniquement)"""
+        """Réinitialise complètement le budget"""
         
         self.budget_data = {
             "solde": 0,
